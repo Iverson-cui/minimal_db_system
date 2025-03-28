@@ -25,7 +25,39 @@ struct Connection
     FILE *file;
     struct Database *db;
 };
-void Database_close(struct Connection *conn);
+void Database_close(struct Connection *conn)
+{
+    if (conn)
+    {
+        if (conn->file)
+        {
+            fclose(conn->file);
+        }
+        if (conn->db)
+        {
+            if (conn->db->rows)
+            {
+                // first free all the name and email pointers in the rows struct.
+                for (int i = 0; i < conn->db->MAX_ROWS; i++)
+                {
+                    // free the name and email pointer in the rows struct.
+                    if (conn->db->rows[i].name)
+                    {
+                        free(conn->db->rows[i].name);
+                    }
+                    if (conn->db->rows[i].email)
+                    {
+                        free(conn->db->rows[i].email);
+                    }
+                }
+                // free rows pointer itself
+                free(conn->db->rows);
+            }
+            free(conn->db);
+        }
+        free(conn);
+    }
+}
 void die(const char *message, struct Connection *conn)
 {
     if (errno)
@@ -64,6 +96,10 @@ void Database_load(struct Connection *conn)
     // write data from to db pointer points to, from the file.
     // first write 2 ints, MAX_DATA and MAX_ROW. Notice that the file pointer automatically update its position.
     flag_load_MACRO = fread(conn->db, sizeof(int), 2, conn->file);
+    if (flag_load_MACRO != 2)
+    {
+        die("Failed to load database", conn);
+    }
     // if successfully it should return 2.
     // write data into where rows point to.
     for (int i = 0; i < conn->db->MAX_ROWS; i++)
@@ -83,7 +119,8 @@ void Database_load(struct Connection *conn)
         // flag_load_ints[i] = fread(&(conn->db->rows[i].set), sizeof(int), 1, conn->file);
         conn->db->rows[i].name = malloc(conn->db->MAX_DATA);
         conn->db->rows[i].email = malloc(conn->db->MAX_DATA);
-        flag_load_strs[i] = (fread(conn->db->rows[i].name, sizeof(char), conn->db->MAX_DATA, conn->file)) & (fread(conn->db->rows[i].email, sizeof(char), conn->db->MAX_DATA, conn->file));
+        flag_load_strs[i] = (fread(conn->db->rows[i].name, sizeof(char), conn->db->MAX_DATA, conn->file)) &
+                            (fread(conn->db->rows[i].email, sizeof(char), conn->db->MAX_DATA, conn->file));
         // if successfully it should return MAX_ROWS.
         if ((flag_load_ints[i] * flag_load_strs[i]) == 0)
         {
@@ -123,59 +160,37 @@ struct Connection *Database_open(const char *filename, char mode)
     return conn;
 }
 // free the memory that db asked for. close the file.
-void database_close(struct Connection *conn)
-{
-    if (conn)
-    {
-        if (conn->file)
-        {
-            fclose(conn->file);
-        }
-        if (conn->db)
-        {
-            if (conn->db->rows)
-            {
-                // first free all the name and email pointers in the rows struct.
-                for (int i = 0; i < conn->db->MAX_ROWS; i++)
-                {
-                    // free the name and email pointer in the rows struct.
-                    if (conn->db->rows[i].name)
-                    {
-                        free(conn->db->rows[i].name);
-                    }
-                    if (conn->db->rows[i].email)
-                    {
-                        free(conn->db->rows[i].email);
-                    }
-                }
-                // free rows pointer itself
-                free(conn->db->rows);
-            }
-            free(conn->db);
-        }
-        free(conn);
-    }
-}
+
 // After operation to the db, first Db_write then Db_close.
 // database is updated according to the user. Now write database info back to the file.
 void Database_write(struct Connection *conn)
 {
-    // NOT READY
     // there is only one db saved in one file.
     // set the FILE pointer to the start of the file.
     rewind(conn->file);
+    int flag_write_MACRO;
     int flag_write_ints;
-    int flag_write_rows;
+    int flag_write_strs;
     // write two ints to the file.
-    flag_write_ints = fwrite(conn->db, sizeof(int), 2, conn->file);
-    // write rows to the file.
-    // in the db, rows is a pointer. We need to retrieve the values and write those values to the file.
-
-    flag_write_rows = (fwrite(conn->db->rows, sizeof(char), conn->db->MAX_DATA, conn->file) &
-                       fwrite(conn->db->rows, sizeof(char), conn->db->MAX_DATA, conn->file));
-    if ((flag_write_ints * flag_write_rows) == 0)
+    flag_write_MACRO = fwrite(conn->db, sizeof(int), 2, conn->file);
+    if (flag_write_MACRO != 2)
     {
         die("Failed to write database", conn);
+    }
+    // write rows to the file.
+    // in the db, rows is a pointer. We need to retrieve the values and write those values to the file.
+    for (int i = 0; i < conn->db->MAX_ROWS; i++)
+    {
+        // write the id and set to the file.
+        flag_write_ints = (fwrite(&(conn->db->rows[i].id), sizeof(int), 1, conn->file) &
+                           fwrite(&(conn->db->rows[i].set), sizeof(int), 1, conn->file));
+        // write the name and email to the file.
+        flag_write_strs = (fwrite(conn->db->rows[i].name, sizeof(char), conn->db->MAX_DATA, conn->file) &
+                           fwrite(conn->db->rows[i].email, sizeof(char), conn->db->MAX_DATA, conn->file));
+        if ((flag_write_ints * flag_write_strs) == 0)
+        {
+            die("Failed to write database", conn);
+        }
     }
 
     // data might be in the internal buffer of the file, so we need to flush the file.
@@ -187,6 +202,7 @@ void Database_write(struct Connection *conn)
 }
 // In Database_open, the conn->db pointer points to a block of memory with nothing in it.
 // after Database_create, database pointer not only has memory, but also has int, rows in it.
+// When the user create a db, the MAX info might not exist either in file or in db, so we have to initialize it.
 void Database_create(struct Connection *conn, int MAX_DATA, int MAX_ROWS)
 {
     // initialize two ints in the db struct.
@@ -195,11 +211,15 @@ void Database_create(struct Connection *conn, int MAX_DATA, int MAX_ROWS)
     // initialize rows pointer in the db struct.
     // for a pointer, first allocate space, then assign concrete data type to the space.
     // allocate space first
-    conn->db->rows = malloc(sizeof(struct Address) * MAX_ROWS);
+    conn->db->rows = malloc(sizeof(struct Address) * conn->db->MAX_ROWS);
+    void *temp_name;
+    void *temp_email;
     for (int i = 0; i < conn->db->MAX_ROWS; i++)
     {
+        temp_name = calloc(conn->db->MAX_DATA, sizeof(char));
+        temp_email = calloc(conn->db->MAX_DATA, sizeof(char));
         // assign to the space
-        conn->db->rows[i] = (struct Address){.id = i, .set = 0};
+        conn->db->rows[i] = (struct Address){.id = i, .set = 0, .name = temp_name, .email = temp_email};
     }
 }
 // set the name and email of a specific row in the conn database
@@ -236,7 +256,9 @@ void Database_get(struct Connection *conn, int id)
 // delete an address in the db rows by assigning it a new blank address.
 void Database_delete(struct Connection *conn, int id)
 {
-    struct Address temp_addr = {.id = id, .set = 0};
+    char *temp_name = calloc(conn->db->MAX_DATA, sizeof(char));
+    char *temp_email = calloc(conn->db->MAX_DATA, sizeof(char));
+    struct Address temp_addr = {.id = id, .set = 0, .name = temp_name, .email = temp_email};
     conn->db->rows[id] = temp_addr;
 }
 // list the addresses that you have changed
@@ -304,6 +326,6 @@ int main(int argc, char *argv[])
     default:
         die("Invalid action, only: c=create, g=get, s=set, d=del, l=list", conn);
     }
-    database_close(conn);
+    Database_close(conn);
     return 0;
 }

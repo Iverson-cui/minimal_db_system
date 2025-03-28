@@ -1,3 +1,6 @@
 # minimun_db_system
 This is my implementation of a minimal database management system based on Learn C the Hard Way Ex17.
 The ideal using case should be: there are files that keep your db data in your computer. Once you open the db, you load info from file to your computer cach. You can add, delete, set the rows in the db. Once done, load the db info back to the file and save it in your disk.
+
+After commit of 3.28, the db system can be used properly(sometimes). There are sometimes segmentation fault and double free of object bug. But when rerun, it works well again. What's surprising is that, once I set a breakpoint and dive into, it always goes as expected. It's like Schrödinger, everytime I watch it it goes well.
+This project tell me the unreliability of C language in malloc/assign memory blocks. This program includes the operation of repeatedly allocate different levels of memory and free them level by level. What's more, every time we load info from file to db in runtime, so much memory is allocated and assigned. These and some other operations not mentioned all lead to the potential bugs occured frequently in my code. 
